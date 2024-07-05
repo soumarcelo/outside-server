@@ -5,9 +5,8 @@ using OutsideServer.Contexts;
 using OutsideServer.DTOs;
 using OutsideServer.Filters;
 using OutsideServer.Forms;
+using OutsideServer.HTTPClients;
 using OutsideServer.Models;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace OutsideServer.Controllers;
 
@@ -17,6 +16,7 @@ namespace OutsideServer.Controllers;
 public class EventsController : ControllerBase
 {
     private readonly OutsideContext _context;
+    private readonly GeocodingAPI _geocodingAPIClient;
 
     private bool EventExists(Guid id) => _context.Events.Any(e => e.Id == id);
 
@@ -41,9 +41,54 @@ public class EventsController : ControllerBase
         return @event;
     }
 
-    public EventsController(OutsideContext context)
+    private async Task<ActionResult<EventLocation>> GetLocationFromAddress(string addressLine1, string? addressLine2, string postalCode, string country)
+    {
+        string address = $"{addressLine1}, {postalCode}, {country}";
+        GeocodingResponse? response =
+            await _geocodingAPIClient.GetAddressInfo(address);
+
+        if (response is null) return Forbid();
+        if (response.status != "OK") return Forbid(); // Detalhar mais
+        if (response.results.Count == 0) return Forbid(); // Detalhar mais
+        if (response.results.Count > 1) return Forbid(); // Detalhar mais
+
+        var addressData = response.results[0];
+
+        string[] _addressLine1 = new string[3]; // route + street_number, + (locality || sublocality)
+        string city = string.Empty; // administrative_area_level_2
+        string state = string.Empty; // administrative_area_level_1
+        string _country = string.Empty; // country
+
+        foreach (var addressComponent in addressData.address_components)
+        {
+            if (addressComponent.types.Contains("route")) _addressLine1[0] = addressComponent.long_name;
+            if (addressComponent.types.Contains("street_number")) _addressLine1[1] = addressComponent.long_name;
+            if (
+                addressComponent.types.Contains("locality")
+                || addressComponent.types.Contains("sublocality")
+                ) _addressLine1[2] = addressComponent.long_name;
+            if (addressComponent.types.Contains("administrative_area_level_2")) city = addressComponent.long_name;
+            if (addressComponent.types.Contains("administrative_area_level_1")) state = addressComponent.long_name;
+            if (addressComponent.types.Contains("country")) _country = addressComponent.long_name;
+        }
+
+        return new EventLocation
+        {
+            Latitude = addressData.geometry.location.lat,
+            Longitude = addressData.geometry.location.lng,
+            Country = _country,
+            State = state,
+            City = city,
+            PostalCode = postalCode,
+            AddressLine1 = $"{_addressLine1[0]} {_addressLine1[1]}, {_addressLine1[2]}",
+            AddressLine2 = addressLine2
+        };
+    }
+
+    public EventsController(OutsideContext context, GeocodingAPI geocodingAPIClient)
     {
         _context = context;
+        _geocodingAPIClient = geocodingAPIClient;
     }
 
     // GET: api/events
@@ -103,12 +148,7 @@ public class EventsController : ControllerBase
         {
             Event @event = validationResult.Value;
 
-            EventLocation? updatedEventLocation = @event.Location.Update(form);
-            if (updatedEventLocation is not null)
-            {
-                _context.Entry(updatedEventLocation).State = EntityState.Modified;
-                await _context.SaveChangesAsync();
-            }
+            
 
             Event? updatedEvent = @event.Update(form);
             if (updatedEvent is not null)
@@ -124,9 +164,7 @@ public class EventsController : ControllerBase
         catch (DbUpdateConcurrencyException)
         {
             transaction.Rollback();
-
-            if (!EventExists(eventId)) return NotFound();
-            else throw;
+            throw;
         }
 
     }
@@ -149,8 +187,7 @@ public class EventsController : ControllerBase
 
         try
         {
-            EventLocation location = new(form);
-            Event @event = new(form, location, userProfile);
+            Event @event = new(form, userProfile);
 
             _context.Events.Add(@event);
             await _context.SaveChangesAsync();
@@ -180,6 +217,103 @@ public class EventsController : ControllerBase
         return NoContent();
     }
 
+    // PUT: api/events/{id}/location
+    // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
+    [HttpPut("{eventId}/location")]
+    public async Task<ActionResult<EventTicketAllotmentData>> PutEventLocation(Guid eventId, UpdateEventLocation form)
+    {
+        ActionResult<Event> validationResult = await ValidateEventOwner(eventId);
+        if (validationResult.Value is null) return validationResult.Result;
+
+        EventLocation? location = validationResult.Value.Location;
+        if (location is null) return NotFound();
+
+        using var transaction = _context.Database.BeginTransaction();
+
+        try
+        {
+            bool needUpdate = false;
+            if (!location.Country.Equals(form.Country)) needUpdate = true;
+            if (!location.PostalCode.Equals(form.PostalCode)) needUpdate = true;
+            if (!location.AddressLine1.Equals(form.AddressLine1)) needUpdate = true;
+
+            if (!needUpdate) return NoContent();
+
+            ActionResult<EventLocation> locationResult =
+                await GetLocationFromAddress(
+                    form.AddressLine1 ?? location.AddressLine1, 
+                    form.AddressLine2, 
+                    form.PostalCode ?? location.PostalCode, 
+                    form.Country ?? location.Country);
+            if (locationResult.Value is null) return locationResult.Result;
+
+            EventLocation updatedLocation = location.Update(locationResult.Value);
+        
+            _context.Entry(updatedLocation).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            
+            transaction.Commit();
+
+            return NoContent();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // POST: api/events/{id}/location
+    // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
+    [HttpPost("{eventId}/location")]
+    public async Task<ActionResult<EventLocationData>> PostEventLocation(Guid eventId, CreateEventLocation form)
+    {
+        ActionResult<Event> validationResult = await ValidateEventOwner(eventId);
+        if (validationResult.Value is null) return validationResult.Result;
+
+        Event @event = validationResult.Value;
+        if (@event.Location is not null) return Forbid();
+
+        using var transaction = _context.Database.BeginTransaction();
+
+        try
+        {
+            ActionResult<EventLocation> locationResult = 
+                await GetLocationFromAddress(form.AddressLine1, form.AddressLine2, form.PostalCode, form.Country);
+            if (locationResult.Value is null) return locationResult.Result;
+
+            EventLocation location = locationResult.Value;
+            @event.Location = location;
+            @event.UpdatedAt = DateTime.UtcNow;
+
+            _context.EventsLocations.Add(location);
+            _context.Entry(@event).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            transaction.Commit();
+
+            return CreatedAtAction(nameof(GetEventLocation), new { eventId }, (EventLocationData)location);
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+    
+    // GET: api/events/{id}/location
+    [HttpGet("{eventId}/location")]
+    public async Task<ActionResult<EventLocationData>> GetEventLocation(Guid eventId)
+    {
+        ActionResult<Event> validationResult = await ValidateEventOwner(eventId);
+        if (validationResult.Value is null) return validationResult.Result;
+
+        EventLocation? location = validationResult.Value.Location;
+        if (location is null) return NotFound();
+
+        return Ok((EventLocationData)location);
+    }
+
+    [AllowAnonymous]
     [HttpGet("{eventId}/ticket_allotments")]
     public async Task<ActionResult<List<EventTicketAllotmentData>>> GetEventTicketAllotments(Guid eventId)
     {
@@ -209,6 +343,35 @@ public class EventsController : ControllerBase
         return Ok(ticketAllotment);
     }
 
+    [HttpPut("{eventId}/ticket_allotments/{allotmentId}")]
+    public async Task<IActionResult> PutEventTicketAllotment(Guid eventId, Guid allotmentId, UpdateEventTicketAllotment form) 
+    {
+        if (!EventExists(eventId)) return NotFound();
+
+        EventTicketAllotment? ticketAllotment = await _context.EventTicketAllotments.FindAsync(allotmentId);
+        if (ticketAllotment is null) return NotFound();
+
+        using var transaction = _context.Database.BeginTransaction();
+
+        try
+        {
+            EventTicketAllotment? updatedTicketallotment = ticketAllotment.Update(form);
+            if (updatedTicketallotment is not null)
+            {
+                _context.Entry(updatedTicketallotment).State = EntityState.Modified;
+                await _context.SaveChangesAsync();
+            }
+
+            transaction.Commit();
+            return NoContent();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
     // POST: api/events/5/ticket_allotments
     [HttpPost("{eventId}/ticket_allotments")]
     public async Task<ActionResult<EventTicketAllotmentData>> PostEventTicketAllotment(Guid eventId, CreateEventTicketAllotment form)
@@ -234,5 +397,19 @@ public class EventsController : ControllerBase
             transaction.Rollback();
             throw;
         }
+    }
+
+    [HttpDelete("{eventId}/ticket_allotments/{allotmentId}")]
+    public async Task<IActionResult> DeleteEventTicketAllotment(Guid eventId, Guid allotmentId) 
+    {
+        if (!EventExists(eventId)) return NotFound();
+
+        EventTicketAllotment? ticketAllotment = await _context.EventTicketAllotments.FindAsync(allotmentId);
+        if (ticketAllotment is null) return NotFound();
+
+        _context.EventTicketAllotments.Remove(ticketAllotment);
+        await _context.SaveChangesAsync();
+
+        return NoContent();
     }
 }

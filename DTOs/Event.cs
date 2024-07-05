@@ -6,6 +6,7 @@ namespace OutsideServer.DTOs;
 public class EventData : CreateEvent
 {
     public required Guid Id { get; set; }
+    public EventLocationData? location {  get; set; }
     public required UserData CreatedBy { get; set; }
     public required DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -13,6 +14,8 @@ public class EventData : CreateEvent
     public static implicit operator EventData(Event entity)
     {
         UserData createdBy = (UserData) entity.CreatedBy;
+        EventLocationData? _location = 
+            entity.Location is not null? (EventLocationData?) entity.Location : null;
 
         return new EventData
         {
@@ -21,15 +24,37 @@ public class EventData : CreateEvent
             Description = entity.Description,
             StartsAt = entity.StartsAt,
             FinishesAt = entity.FinishesAt,
-            Latitude = entity.Location.Latitude,
-            Longitude = entity.Location.Longitude,
-            Country = entity.Location.Country,
-            State = entity.Location.State,
-            City = entity.Location.City,
-            PostalCode = entity.Location.PostalCode,
-            AddressLine1 = entity.Location.AddressLine1,
-            AddressLine2 = entity.Location.AddressLine2,
+            location = _location,
             CreatedBy = createdBy,
+            CreatedAt = entity.CreatedAt,
+            UpdatedAt = entity.UpdatedAt
+        };
+    }
+}
+
+public class EventLocationData : CreateEventLocation
+{
+    public required Guid Id { get; set; }
+    public required double Latitude { get; set; }
+    public required double Longitude { get; set; }
+    public required string State { get; set; }
+    public required string City { get; set; }
+    public required DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+
+    public static implicit operator EventLocationData(EventLocation entity)
+    {
+        return new EventLocationData
+        {
+            Id = entity.Id,
+            Latitude = entity.Latitude,
+            Longitude = entity.Longitude,
+            Country = entity.Country,
+            State = entity.State,
+            City = entity.City,
+            PostalCode = entity.PostalCode,
+            AddressLine1 = entity.AddressLine1,
+            AddressLine2 = entity.AddressLine2,
             CreatedAt = entity.CreatedAt,
             UpdatedAt = entity.UpdatedAt
         };

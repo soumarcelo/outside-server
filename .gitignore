@@ -3,6 +3,11 @@
 ##
 ## Get latest from `dotnet new gitignore`
 
+# By user
+Migrations/
+db.db3
+db.db3-*
+
 # dotenv files
 .env
 

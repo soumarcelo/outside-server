@@ -70,6 +70,7 @@ public class UsersController : ControllerBase
         using var transaction = _context.Database.BeginTransaction();
         
         Guid id = (Guid)RouteData.Values["userId"];
+        if (!UserProfileExists(id)) return NotFound();
 
         try
         {
@@ -100,9 +101,7 @@ public class UsersController : ControllerBase
         catch (DbUpdateConcurrencyException)
         {
             transaction.Rollback();
-
-            if (!UserProfileExists(id)) return NotFound();
-            else throw;
+            throw;
         }
     }
 

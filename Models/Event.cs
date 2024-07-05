@@ -1,7 +1,7 @@
-﻿using OutsideServer.Forms;
+﻿using OutsideServer.DTOs;
+using OutsideServer.Forms;
 using OutsideServer.Utils;
 using System.ComponentModel.DataAnnotations;
-using System.Text.Json.Serialization;
 
 namespace OutsideServer.Models;
 
@@ -22,8 +22,7 @@ public class Event
     [Required]
     public DateTime FinishesAt { get; set; }
 
-    [Required]
-    public EventLocation Location { get; set; }
+    public EventLocation? Location { get; set; }
 
     public List<EventTicketAllotment>? TicketAllotments { get; set; }
 
@@ -36,13 +35,12 @@ public class Event
 
     public Event() { }
 
-    public Event(CreateEvent form, EventLocation location, UserProfile owner)
+    public Event(CreateEvent form, UserProfile owner)
     {
         Name = form.Name;
         Description = form.Description;
         StartsAt = form.StartsAt;
         FinishesAt = form.FinishesAt;
-        Location = location;
         CreatedBy = owner;
     }
 
@@ -80,37 +78,6 @@ public class Event
     }
 }
 
-public class EventTicketAllotment
-{
-    public Guid Id { get; set; }
-
-    [Required]
-    public string Name { get; set; }
-
-    [Required]
-    public Event Event { get; set; }
-
-    [Required]
-    public int Amount { get; set; } //PaymentAmount
-
-    [Required]
-    public int TicketsQuantityLimit { get; set; }
-
-    [Required]
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? UpdatedAt { get; set; }
-
-    public EventTicketAllotment() { }
-
-    public EventTicketAllotment(CreateEventTicketAllotment form, Event @event)
-    {
-        Name = form.Name;
-        Amount = form.PaymentAmount;
-        TicketsQuantityLimit = form.TicketsQuantityLimit;
-        Event = @event;
-    }
-}
-
 public class EventLocation
 {
     public Guid Id { get; set; }
@@ -143,61 +110,68 @@ public class EventLocation
 
     public EventLocation() { }
 
-
-    public EventLocation(CreateEvent form)
+    public EventLocation Update(EventLocation updatedLocation)
     {
-        Latitude = form.Latitude;
-        Longitude = form.Longitude;
-        Country = form.Country;
-        State = form.State;
-        City = form.City;
-        PostalCode = form.PostalCode;
-        AddressLine1 = form.AddressLine1;
-        AddressLine2 = form.AddressLine2;
+        Latitude = updatedLocation.Latitude;
+        Longitude = updatedLocation.Longitude;
+        Country = updatedLocation.Country;
+        State = updatedLocation.State;
+        City = updatedLocation.City;
+        PostalCode = updatedLocation.PostalCode;
+        AddressLine1 = updatedLocation.AddressLine1;
+        AddressLine2 = updatedLocation.AddressLine2;
+        UpdatedAt = DateTime.UtcNow;
+
+        return this;
+    }
+}
+
+public class EventTicketAllotment
+{
+    public Guid Id { get; set; }
+
+    [Required]
+    public string Name { get; set; }
+
+    [Required]
+    public Event Event { get; set; }
+
+    [Required]
+    public int Amount { get; set; } //PaymentAmount
+
+    [Required]
+    public int TicketsQuantityLimit { get; set; }
+
+    [Required]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
+
+    public EventTicketAllotment() { }
+
+    public EventTicketAllotment(CreateEventTicketAllotment form, Event @event)
+    {
+        Name = form.Name;
+        Amount = form.PaymentAmount;
+        TicketsQuantityLimit = form.TicketsQuantityLimit;
+        Event = @event;
     }
 
-    public EventLocation? Update(UpdateEvent form)
+    public EventTicketAllotment? Update(UpdateEventTicketAllotment form)
     {
         bool updated = false;
-
-        if (Comparator.IsValidUpdate(Latitude, form.Latitude))
+        if (Comparator.IsValidUpdate(Name, form.Name))
         {
-            Latitude = (double)form.Latitude;
+            Name = form.Name;
             updated = true;
         }
-        if (Comparator.IsValidUpdate(Longitude, form.Longitude))
+        if (Comparator.IsValidUpdate(Amount, form.PaymentAmount))
         {
-            Longitude = (double)form.Longitude;
+            Amount = form.PaymentAmount;
             updated = true;
         }
-        if (Comparator.IsValidUpdate(Country, form.Country))
+        if (Comparator.IsValidUpdate(TicketsQuantityLimit, form.TicketsQuantityLimit))
         {
-            Country = form.Country;
-            updated = true;
-        }
-        if (Comparator.IsValidUpdate(State, form.State))
-        {
-            State = form.State;
-            updated = true;
-        }
-        if (Comparator.IsValidUpdate(City, form.City))
-        {
-            City = form.City;
-            updated = true;
-        }
-        if (Comparator.IsValidUpdate(PostalCode, form.PostalCode))
-        {
-            PostalCode = form.PostalCode;
-            updated = true;
-        }
-        if (Comparator.IsValidUpdate(AddressLine1, form.AddressLine1))
-        {
-            AddressLine1 = form.AddressLine1;
-            updated = true;
-        }
-        if (Comparator.IsValidUpdate(AddressLine1, form.AddressLine2))
-        {
-            AddressLine2 = form.AddressLine2;
+            TicketsQuantityLimit = form.TicketsQuantityLimit;
             updated = true;
         }
 
